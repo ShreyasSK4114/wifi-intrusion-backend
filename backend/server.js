@@ -19,7 +19,7 @@ app.use(helmet({
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? [
-        'https://wifi-intrusion-detector-bunw-d0xqwfx23.vercel.app',
+        'https://wifi-intrusion-detector-bunw.vercel.app',
         process.env.FRONTEND_URL
       ] 
     : ['http://localhost:3000', 'http://127.0.0.1:3000'],
