@@ -7,12 +7,12 @@
 const char* WIFI_SSID = "Sunil BSNL";  // Your WiFi network name
 const char* WIFI_PASSWORD = "9844007710";  // Your WiFi password
 
-const char* SERVER_URL = "http://192.168.1.37:5000/api/scan";  // Change for production
+const char* SERVER_URL = "https://wifi-intrusion-backend.onrender.com/api/scan";  // Change for production
 const char* API_KEY = "wifi-detector-secret-key-2025";  // Match your .env file
 const char* DEVICE_ID = "ESP8266_001";
 
 // Timing configuration
-const unsigned long SCAN_INTERVAL = 30000;  // 30 seconds between scans
+const unsigned long SCAN_INTERVAL = 10000;  // 30 seconds between scans
 const unsigned long WIFI_TIMEOUT = 10000;   // 10 seconds WiFi connection timeout
 const unsigned long HTTP_TIMEOUT = 15000;   // 15 seconds HTTP timeout
 

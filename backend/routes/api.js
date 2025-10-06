@@ -1,4 +1,5 @@
 const express = require('express');
+const ThreatDetector = require('../services/threatDetection');
 const Network = require('../models/Network');
 const router = express.Router();
 
@@ -16,6 +17,7 @@ const validateApiKey = (req, res, next) => {
 };
 
 // POST /api/scan - Receive scan data from ESP8266
+// POST /api/scan - Receive scan data from ESP8266 with threat analysis
 router.post('/scan', validateApiKey, async (req, res) => {
   try {
     const { networks, deviceId = 'ESP8266_001' } = req.body;
@@ -32,8 +34,12 @@ router.post('/scan', validateApiKey, async (req, res) => {
       processed: 0,
       updated: 0,
       created: 0,
+      threats: [],
       errors: []
     };
+
+    // Get all existing networks for threat analysis
+    const allNetworks = await Network.find({});
 
     for (const networkData of networks) {
       try {
@@ -69,9 +75,38 @@ router.post('/scan', validateApiKey, async (req, res) => {
           setDefaultsOnInsert: true
         };
 
-        const result = await Network.findOneAndUpdate(filter, update, options);
+        const network = await Network.findOneAndUpdate(filter, update, options);
         
-        if (result.seenCount === 1) {
+        // Perform threat analysis
+        const threatAssessment = ThreatDetector.assessThreat(
+          network, 
+          allNetworks, 
+          network.history || []
+        );
+
+        // Auto-update network status based on threat level
+        let autoStatus = network.status;
+        if (threatAssessment.isHarmful && network.status === 'unknown') {
+          autoStatus = 'suspicious';
+          await Network.findByIdAndUpdate(network._id, { status: 'suspicious' });
+        }
+
+        // Store threat assessment results
+        if (threatAssessment.threats.length > 0) {
+          results.threats.push({
+            ssid: network.ssid,
+            bssid: network.bssid,
+            riskLevel: threatAssessment.riskLevel,
+            harmScore: threatAssessment.harmScore,
+            threats: threatAssessment.threats,
+            recommendation: threatAssessment.recommendation,
+            isHarmful: threatAssessment.isHarmful
+          });
+
+          console.log(`⚠️  THREAT DETECTED: ${network.ssid} (${network.bssid}) - Risk: ${threatAssessment.riskLevel}, Score: ${threatAssessment.harmScore}`);
+        }
+        
+        if (network.seenCount === 1) {
           results.created++;
         } else {
           results.updated++;
@@ -84,9 +119,26 @@ router.post('/scan', validateApiKey, async (req, res) => {
       }
     }
 
+    // Log threat summary
+    if (results.threats.length > 0) {
+      console.log(`🚨 SECURITY ALERT: ${results.threats.length} threats detected in this scan`);
+      
+      const criticalThreats = results.threats.filter(t => t.riskLevel === 'critical').length;
+      const highThreats = results.threats.filter(t => t.riskLevel === 'high').length;
+      
+      if (criticalThreats > 0) console.log(`❌ CRITICAL THREATS: ${criticalThreats}`);
+      if (highThreats > 0) console.log(`⚠️  HIGH THREATS: ${highThreats}`);
+    }
+
     res.json({
       success: true,
       message: `Processed ${results.processed} networks`,
+      securitySummary: {
+        threatsDetected: results.threats.length,
+        criticalThreats: results.threats.filter(t => t.riskLevel === 'critical').length,
+        highThreats: results.threats.filter(t => t.riskLevel === 'high').length,
+        harmfulNetworks: results.threats.filter(t => t.isHarmful).length
+      },
       ...results
     });
 
@@ -220,6 +272,49 @@ router.get('/stats', async (req, res) => {
     console.error('Stats endpoint error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch statistics',
+      message: error.message 
+    });
+  }
+});
+// GET /api/threats - Get threat analysis for all networks
+router.get('/threats', async (req, res) => {
+  try {
+    const networks = await Network.find({}).select('-__v');
+    const threats = [];
+
+    for (const network of networks) {
+      const threatAssessment = ThreatDetector.assessThreat(
+        network, 
+        networks, 
+        network.history || []
+      );
+
+      if (threatAssessment.threats.length > 0 || threatAssessment.harmScore > 0) {
+        threats.push(threatAssessment);
+      }
+    }
+
+    // Sort by harm score (highest first)
+    threats.sort((a, b) => b.harmScore - a.harmScore);
+
+    res.json({
+      success: true,
+      totalNetworks: networks.length,
+      threatsAnalyzed: threats.length,
+      summary: {
+        critical: threats.filter(t => t.riskLevel === 'critical').length,
+        high: threats.filter(t => t.riskLevel === 'high').length,
+        medium: threats.filter(t => t.riskLevel === 'medium').length,
+        low: threats.filter(t => t.riskLevel === 'low').length,
+        harmful: threats.filter(t => t.isHarmful).length
+      },
+      threats
+    });
+
+  } catch (error) {
+    console.error('Threats endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Failed to analyze threats',
       message: error.message 
     });
   }

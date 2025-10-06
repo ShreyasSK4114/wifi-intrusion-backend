@@ -63,11 +63,43 @@ interface Stats {
   suspicious: number;
 }
 
+interface Threat {
+  networkId: string;
+  ssid: string;
+  bssid: string;
+  riskLevel: 'critical' | 'high' | 'medium' | 'low';
+  harmScore: number;
+  threats: Array<{
+    type: string;
+    severity: string;
+    description: string;
+    details: string;
+  }>;
+  recommendation: {
+    general: string;
+    specific: string[];
+  };
+  isHarmful: boolean;
+  timestamp: string;
+}
+
+interface ThreatSummary {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  harmful: number;
+}
+
 const API_BASE_URL = 'https://wifi-intrusion-backend.onrender.com/api';
+
 
 const Dashboard: React.FC = () => {
   const [networks, setNetworks] = useState<Network[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [threats, setThreats] = useState<Threat[]>([]);
+  const [threatSummary, setThreatSummary] = useState<ThreatSummary | null>(null);
+  const [showThreatsOnly, setShowThreatsOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
@@ -80,13 +112,16 @@ const Dashboard: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [networksResponse, statsResponse] = await Promise.all([
+      const [networksResponse, statsResponse, threatsResponse] = await Promise.all([
         axios.get(`${API_BASE_URL}/networks?status=${filter}&search=${search}&limit=100`),
-        axios.get(`${API_BASE_URL}/stats`)
+        axios.get(`${API_BASE_URL}/stats`),
+        axios.get(`${API_BASE_URL}/threats`)
       ]);
 
       setNetworks(networksResponse.data.networks);
       setStats(statsResponse.data.stats);
+      setThreats(threatsResponse.data.threats || []);
+      setThreatSummary(threatsResponse.data.summary || null);
       setLastUpdate(new Date());
     } catch (err: any) {
       setError(err.message || 'Failed to fetch data');
@@ -207,7 +242,7 @@ const Dashboard: React.FC = () => {
       {/* Stats Cards */}
       {stats && (
         <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>Total Networks</Typography>
@@ -215,7 +250,7 @@ const Dashboard: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>Recently Active</Typography>
@@ -223,7 +258,7 @@ const Dashboard: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>Trusted</Typography>
@@ -231,15 +266,27 @@ const Dashboard: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
-            <Card>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <Card sx={{ bgcolor: threatSummary?.harmful ? '#ffebee' : 'inherit' }}>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>Unknown</Typography>
-                <Typography variant="h4" color="text.secondary">{stats.unknown}</Typography>
+                <Typography color="textSecondary" gutterBottom>Threats Detected</Typography>
+                <Typography variant="h4" color="error.main">
+                  {threats.length}
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <Card sx={{ bgcolor: threatSummary?.critical ? '#ffcdd2' : 'inherit' }}>
+              <CardContent>
+                <Typography color="textSecondary" gutterBottom>Critical Threats</Typography>
+                <Typography variant="h4" color="error.main">
+                  {threatSummary?.critical || 0}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>Suspicious</Typography>
@@ -248,6 +295,46 @@ const Dashboard: React.FC = () => {
             </Card>
           </Grid>
         </Grid>
+      )}
+
+      {/* Threat Alerts */}
+      {threats.length > 0 && (
+        <Box mb={4}>
+          <Alert 
+            severity={threatSummary?.critical ? 'error' : threatSummary?.high ? 'warning' : 'info'}
+            sx={{ mb: 2 }}
+          >
+            <Typography variant="h6" gutterBottom>
+              🚨 Security Alert: {threats.length} potential threats detected
+            </Typography>
+            <Typography variant="body2">
+              Critical: {threatSummary?.critical || 0} | 
+              High: {threatSummary?.high || 0} | 
+              Medium: {threatSummary?.medium || 0} | 
+              Low: {threatSummary?.low || 0}
+            </Typography>
+          </Alert>
+
+          {/* Show top 3 most critical threats */}
+          {threats.slice(0, 3).map((threat, index) => (
+            <Alert key={index} severity={threat.riskLevel === 'critical' || threat.riskLevel === 'high' ? 'error' : 'warning'} sx={{ mb: 1 }}>
+              <Box>
+                <Typography variant="subtitle2" fontWeight="bold">
+                  🛡️ {threat.ssid} ({threat.bssid})
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Risk Level: {threat.riskLevel.toUpperCase()} (Score: {threat.harmScore}/100)
+                </Typography>
+                <Typography variant="body2">
+                  {threat.threats.map(t => t.description).join('; ')}
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1, fontStyle: 'italic' }}>
+                  💡 Recommendation: {threat.recommendation.general}
+                </Typography>
+              </Box>
+            </Alert>
+          ))}
+        </Box>
       )}
 
       {/* Charts */}
@@ -295,7 +382,7 @@ const Dashboard: React.FC = () => {
       </Grid>
 
       {/* Filters */}
-      <Box display="flex" gap={2} mb={3}>
+      <Box display="flex" gap={2} mb={3} flexWrap="wrap">
         <TextField
           select
           label="Status Filter"
@@ -319,6 +406,15 @@ const Dashboard: React.FC = () => {
           }}
           sx={{ minWidth: 300 }}
         />
+
+        <Button
+          variant={showThreatsOnly ? 'contained' : 'outlined'}
+          color="error"
+          onClick={() => setShowThreatsOnly(!showThreatsOnly)}
+          startIcon={<Warning />}
+        >
+          {showThreatsOnly ? 'Show All' : 'Threats Only'}
+        </Button>
       </Box>
 
       {/* Networks Table */}
@@ -337,73 +433,90 @@ const Dashboard: React.FC = () => {
                   <TableCell>Channel</TableCell>
                   <TableCell>Security</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Threat Level</TableCell>
                   <TableCell>Seen Count</TableCell>
                   <TableCell>Last Seen</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {networks.map((network) => (
-                  <TableRow key={network._id}>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {network.ssid || 'Hidden Network'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontFamily="monospace">
-                        {network.bssid}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {getSignalIcon(network.rssi)}
-                        <Typography variant="body2">
-                          {network.rssi} dBm
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>{network.channel}</TableCell>
-                    <TableCell>
-                      <Chip 
-                        label={network.encType} 
-                        size="small"
-                        color={network.encType === 'Open' ? 'error' : 'default'}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {getStatusChip(network.status)}
-                    </TableCell>
-                    <TableCell>{network.seenCount}</TableCell>
-                    <TableCell>
-                      <Tooltip title={format(new Date(network.lastSeen), 'PPpp')}>
-                        <Typography variant="body2">
-                          {formatDistanceToNow(new Date(network.lastSeen), { addSuffix: true })}
-                        </Typography>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <Box display="flex" gap={1}>
-                        <Button
-                          size="small"
-                          color="success"
-                          onClick={() => updateNetworkStatus(network._id, 'trusted')}
-                          disabled={network.status === 'trusted'}
-                        >
-                          Trust
-                        </Button>
-                        <Button
-                          size="small"
-                          color="error"
-                          onClick={() => updateNetworkStatus(network._id, 'suspicious')}
-                          disabled={network.status === 'suspicious'}
-                        >
-                          Flag
-                        </Button>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {networks
+                  .filter(network => !showThreatsOnly || threats.some(t => t.bssid === network.bssid))
+                  .map((network) => {
+                    const networkThreat = threats.find(t => t.bssid === network.bssid);
+                    return (
+                      <TableRow key={network._id}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {network.ssid || 'Hidden Network'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontFamily="monospace">
+                            {network.bssid}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {getSignalIcon(network.rssi)}
+                            <Typography variant="body2">
+                              {network.rssi} dBm
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>{network.channel}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={network.encType} 
+                            size="small"
+                            color={network.encType === 'Open' ? 'error' : 'default'}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {getStatusChip(network.status)}
+                        </TableCell>
+                        <TableCell>
+                          {networkThreat ? (
+                            <Chip 
+                              label={networkThreat.riskLevel.toUpperCase()} 
+                              size="small"
+                              color={networkThreat.riskLevel === 'critical' || networkThreat.riskLevel === 'high' ? 'error' : 'warning'}
+                            />
+                          ) : (
+                            <Chip label="SAFE" size="small" color="success" />
+                          )}
+                        </TableCell>
+                        <TableCell>{network.seenCount}</TableCell>
+                        <TableCell>
+                          <Tooltip title={format(new Date(network.lastSeen), 'PPpp')}>
+                            <Typography variant="body2">
+                              {formatDistanceToNow(new Date(network.lastSeen), { addSuffix: true })}
+                            </Typography>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell>
+                          <Box display="flex" gap={1}>
+                            <Button
+                              size="small"
+                              color="success"
+                              onClick={() => updateNetworkStatus(network._id, 'trusted')}
+                              disabled={network.status === 'trusted'}
+                            >
+                              Trust
+                            </Button>
+                            <Button
+                              size="small"
+                              color="error"
+                              onClick={() => updateNetworkStatus(network._id, 'suspicious')}
+                              disabled={network.status === 'suspicious'}
+                            >
+                              Flag
+                            </Button>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
               </TableBody>
             </Table>
           </TableContainer>
